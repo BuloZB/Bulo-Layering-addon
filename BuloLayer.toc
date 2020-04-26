@@ -1,0 +1,9 @@
+﻿## Interface: 11304
+## Title: |cffff306fBuloLayer|r
+## Author: Bulo+DungFu
+## Version: 1.2.4
+## Notes: Allows easy and automatic layer hopping within guild
+## SavedVariablesPerCharacter: BuloLayerOptions
+
+embeds.xml
+BuloLayer.lua
