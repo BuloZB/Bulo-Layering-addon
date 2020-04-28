@@ -1,9 +1,18 @@
 BuloLayer = LibStub("AceAddon-3.0"):NewAddon("BuloLayer", "AceConsole-3.0", "AceEvent-3.0", "AceComm-3.0", "AceTimer-3.0")
 BuloLayer.Dialog = LibStub("AceConfigDialog-3.0")
 BuloLayer:RegisterChatCommand("lh", "ChatCommand")
+BuloLayer.VERSION = 141
+
+function GetVersionString(ver)
+	if ver >= 10 then
+		return GetVersionString(floor(ver/10)) .. "." .. tostring(ver % 10)
+	else
+		return "v" .. tostring(ver)
+	end
+end
 
 BuloLayer.options = {
-	name = "|TInterface\\AddOns\\BuloLayer\\Media\\swap:24:24:0:5|t BuloLayer v" .. GetAddOnMetadata("BuloLayer", "Version"),
+	name = "|TInterface\\AddOns\\BuloLayer\\Media\\swap:24:24:0:5|t BuloLayer " .. GetVersionString(BuloLayer.VERSION),
 	handler = BuloLayer,
 	type = 'group',
 	args = {
@@ -44,14 +53,15 @@ BuloLayer.RequestLayerMinMaxPrefix = "LH_rlmm"
 BuloLayer.RequestAllPlayersLayersPrefix = "LH_rapl"
 BuloLayer.SendLayerMinMaxPrefix = "LH_slmm"
 BuloLayer.SendLayerMinMaxWhisperPrefix = "LH_slmmw"
+BuloLayer.SendResetLayerDataPrefix = "LH_srld"
 BuloLayer.DEFAULT_PREFIX = "BuloLayer"
 BuloLayer.CHAT_PREFIX = "|cFFFF69B4[BuloLayer]|r "
-BuloLayer.COMM_VER = 124
 BuloLayer.minLayerId = -1
 BuloLayer.maxLayerId = -1
 BuloLayer.currentLayerId = -1
 BuloLayer.foundOldVersion = false
 BuloLayer.SendCurrentMinMaxTimer = nil
+BuloLayer.paused = false
 
 function BuloLayer:OnInitialize()
 	self.BuloLayerLauncher = LibStub("LibDataBroker-1.1"):NewDataObject("BuloLayer", {
@@ -67,7 +77,9 @@ function BuloLayer:OnInitialize()
 		end,
 		OnEnter = function(self)
 			local layerText = ""
-			if BuloLayer.currentLayerId < 0 then
+			if BuloLayer.paused then
+				layerText = "Resetting layer data for the guild. Should only take a few more seconds..."
+			elseif BuloLayer.currentLayerId < 0 then
 				layerText = "Unknown Layer. Target any NPC or mob to get current layer.\n(layer id: " .. BuloLayer.currentLayerId .. ", min: " .. BuloLayer.minLayerId .. ", max: " .. BuloLayer.maxLayerId .. " )"
 			elseif not MinMaxValid(BuloLayer.minLayerId, BuloLayer.maxLayerId) then
 				layerText = "Min/max layer IDs are unknown. Need more data from guild to determine current layer\n(but you can still request a layer switch). (layer id: " .. BuloLayer.currentLayerId .. ", min: " .. BuloLayer.minLayerId .. ", max: " .. BuloLayer.maxLayerId .. " )"
@@ -75,7 +87,7 @@ function BuloLayer:OnInitialize()
 				layerText = "Current Layer: " .. GetLayerGuess(BuloLayer.currentLayerId, BuloLayer.minLayerId, BuloLayer.maxLayerId) .. "\n(layer id: " .. BuloLayer.currentLayerId .. ", min: " .. BuloLayer.minLayerId .. ", max: " .. BuloLayer.maxLayerId .. " )"
 			end
 			GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-			GameTooltip:AddLine("|cFFFFFFFFLayer Hopper|r v"..GetAddOnMetadata("BuloLayer", "Version"))
+			GameTooltip:AddLine("|cFFFFFFFFLayer Hopper|r " .. GetVersionString(BuloLayer.VERSION))
 			GameTooltip:AddLine(layerText)
 			GameTooltip:AddLine("Left click to request a layer hop.")
 			GameTooltip:AddLine("Right click to access Layer Hopper settings.")
@@ -115,8 +127,8 @@ end
 function BuloLayer:PLAYER_ENTERING_WORLD()
 	self.currentLayerId = -1
 	self:UpdateIcon()
-	if self.minLayerId < 0 or self.maxLayerId < 0 then
-		self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestLayerMinMaxPrefix .. "," .. self.COMM_VER .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
+	if not self.paused and (self.minLayerId < 0 or self.maxLayerId < 0) then
+		self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestLayerMinMaxPrefix .. "," .. self.VERSION .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
 	end
 end
 
@@ -130,28 +142,47 @@ function BuloLayer:RequestLayerHop()
 	elseif IsInInstance() then
 		print(self.CHAT_PREFIX .. "Can't request layer hop while in an instance or battleground.")
 		return
+	elseif self.paused then
+		print(self.CHAT_PREFIX .. "Resetting layer data for the guild. Should only take a few more seconds...")
+		return
 	end
-	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestLayerSwitchPrefix .. "," .. self.COMM_VER .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
+	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestLayerSwitchPrefix .. "," .. self.VERSION .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
 	print(self.CHAT_PREFIX .. "Requesting layer hop from layer " .. GetLayerGuess(self.currentLayerId, self.minLayerId, self.maxLayerId) .. " to another layer.")
 end
 
 function BuloLayer:RequestAllPlayersLayers()
-	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestAllPlayersLayersPrefix .. "," .. self.COMM_VER .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
+	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.RequestAllPlayersLayersPrefix .. "," .. self.VERSION .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
+end
+
+function BuloLayer:ResetLayerData()
+	local _, _, guildRankIndex = GetGuildInfo("player");
+	if guildRankIndex <= 3 then
+		self.currentLayerId = -1
+		self.minLayerId = -1
+		self.maxLayerId = -1
+		self.paused = true
+		print(self.CHAT_PREFIX .. "Resetting layer data in the guild...")
+		self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.SendResetLayerDataPrefix .. "," .. self.VERSION .. ",-1,-1,-1", "GUILD")
+		self:ScheduleTimer("UnPause", 3 + random() * 3)
+		self:UpdateIcon()
+	else
+		print(self.CHAT_PREFIX .. "Can't request layer data reset unless you are class lead or higher rank.")
+	end
 end
 
 function BuloLayer:OnCommReceived(prefix, msg, distribution, sender)
-	if sender ~= UnitName("player") and strlower(prefix) == strlower(self.DEFAULT_PREFIX) then
+	if sender ~= UnitName("player") and strlower(prefix) == strlower(self.DEFAULT_PREFIX) and not self.paused then
 		local command, ver, layerId, minLayerId, maxLayerId = strsplit(",", msg)
 		ver = tonumber(ver)
 		layerId = tonumber(layerId)
 		minLayerId = tonumber(minLayerId)
 		maxLayerId = tonumber(maxLayerId)
-		if ver ~= self.COMM_VER then
-			if ver > self.COMM_VER and not self.foundOldVersion then
+		if ver ~= self.VERSION then
+			if ver > self.VERSION and not self.foundOldVersion then
 				print(self.CHAT_PREFIX .. "You are running an old version of Layer Hopper, please update from curseforge!")
 				self.foundOldVersion = true
 			end
-			if floor(ver / 10) ~= floor(self.COMM_VER / 10) then
+			if floor(ver / 10) ~= floor(self.VERSION / 10) then
 				return
 			end
 		end
@@ -188,9 +219,24 @@ function BuloLayer:OnCommReceived(prefix, msg, distribution, sender)
 				end
 			elseif command == BuloLayer.RequestAllPlayersLayersPrefix then
 				local minOrMaxUpdated = self:UpdateMinMax(minLayerId, maxLayerId)
-				self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.SendLayerMinMaxWhisperPrefix .. "," .. self.COMM_VER .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "WHISPER", sender)
+				self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.SendLayerMinMaxWhisperPrefix .. "," .. self.VERSION .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "WHISPER", sender)
 				if minOrMaxUpdated then
 					self:UpdateIcon()
+				end
+			elseif command == BuloLayer.SendResetLayerDataPrefix then
+				for i=1,GetNumGuildMembers() do
+					local nameWithRealm, rank, rankIndex = GetGuildRosterInfo(i)
+					local name, realm = strsplit("-", nameWithRealm)
+					if name == sender and rankIndex <= 3 then
+						self.currentLayerId = -1
+						self.minLayerId = -1
+						self.maxLayerId = -1
+						self.paused = true
+						print(self.CHAT_PREFIX .. sender .. " requested a reset of layer data for the guild.")
+						self:ScheduleTimer("UnPause", 3 + random() * 3)
+						self:UpdateIcon()
+						return
+					end
 				end
 			end
 		elseif distribution == "WHISPER" then
@@ -206,7 +252,7 @@ function BuloLayer:PrintPlayerLayerWithVersion(layerId, ver, sender)
 	local layerGuess = GetLayerGuess(layerId, self.minLayerId, self.maxLayerId)
 	local myLayerGuess = GetLayerGuess(self.currentLayerId, self.minLayerId, self.maxLayerId)
 	local versionString = ""
-	if ver < self.COMM_VER then
+	if ver < self.VERSION then
 		versionString = "|cFFC21807" .. GetVersionString(ver) .. "|r"
 	else
 		versionString = GetVersionString(ver)
@@ -219,15 +265,19 @@ function BuloLayer:PrintPlayerLayerWithVersion(layerId, ver, sender)
 	else
 		layerString = "layer " .. tostring(layerGuess)
 	end
-	print(self.CHAT_PREFIX .. sender .. ": " .. layerString .. " - " .. versionString)
+	print(self.CHAT_PREFIX .. sender .. ": " .. layerString .. " - " .. versionString .. " layer id: " .. layerId)
 end
 
 function BuloLayer:SendCurrentMinMax()
-	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.SendLayerMinMaxPrefix .. "," .. self.COMM_VER .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
+	self:SendCommMessage(self.DEFAULT_PREFIX, BuloLayer.SendLayerMinMaxPrefix .. "," .. self.VERSION .. "," .. self.currentLayerId .. "," .. self.minLayerId .. "," .. self.maxLayerId, "GUILD")
 	if self.SendCurrentMinMaxTimer then
 		self:CancelTimer(self.SendCurrentMinMaxTimer)
 		self.SendCurrentMinMaxTimer = nil
 	end
+end
+
+function BuloLayer:UnPause()
+	self.paused = false
 end
 
 function BuloLayer:ChatCommand(input)
@@ -238,10 +288,13 @@ function BuloLayer:ChatCommand(input)
 		self:RequestLayerHop()
 	elseif input == "list" then
 		self:RequestAllPlayersLayers()
+	elseif input == "reset" then
+		self:ResetLayerData()
 	else
 		print("/lh config - Open/close configuration window\n" ..
 			"/lh hop - Request a layer hop\n" ..
-			"/lh list - List layers and versions for all guildies")
+			"/lh list - List layers and versions for all guildies\n" ..
+			"/lh reset - Reset layer data for all guildies. (can only be done by class lead rank or above)")
 	end
 end
 
@@ -254,20 +307,19 @@ function BuloLayer:ToggleConfigWindow()
 end
 
 function BuloLayer:UpdateLayerFromUnit(unit)
-	if IsInInstance() then
+	if IsInInstance() or self.paused then
 		return
 	end
-	self.currentZoneId = C_Map.GetBestMapForUnit("player")
 	local guid = UnitGUID(unit)
 	if guid ~= nil then
 		local unittype, zero, server_id, instance_id, zone_uid, npc_id, spawn_uid = strsplit("-", guid);
-		if UnitExists(unit) and not UnitIsPlayer(unit) and unittype ~= "Pet" and not IsGuidOwned(guid) then
+		if UnitExists(unit) and not UnitIsPlayer(unit) and unittype ~= "Pet" and UnitLevel(unit) ~= 1 then
 			local layerId = -1
 			local _,_,_,_,i = strsplit("-", guid)
 			if i then
 				layerId = tonumber(i)
 			end
-			if layerId >= 0 then
+			if self:IsLayerIdValid(layerId) then
 				self.currentLayerId = layerId
 				local minOrMaxUpdated = self:UpdateMinMax(self.currentLayerId, self.currentLayerId)
 				self:UpdateIcon()
@@ -293,7 +345,7 @@ function BuloLayer:UpdateMinMax(min, max)
 end
 
 function BuloLayer:UpdateMin(min)
-	if min >= 0 and (self.minLayerId < 0 or min < self.minLayerId) then
+	if self:IsLayerIdValid(min) and (self.minLayerId < 0 or min < self.minLayerId) then
 		self.minLayerId = min
 		return true
 	end
@@ -301,21 +353,19 @@ function BuloLayer:UpdateMin(min)
 end
 
 function BuloLayer:UpdateMax(max)
-	if max >= 0 and (self.maxLayerId < 0 or max > self.maxLayerId) then
+	if self:IsLayerIdValid(max) and (self.maxLayerId < 0 or max > self.maxLayerId) then
 		self.maxLayerId = max
 		return true
 	end
 	return false
 end
 
-local tip = CreateFrame('GameTooltip', 'GuardianOwnerTooltip', nil, 'GameTooltipTemplate')
-
-function IsGuidOwned(guid)
-	tip:SetOwner(WorldFrame, 'ANCHOR_NONE')
-	tip:SetHyperlink('unit:' .. guid or '')
-	local text = GuardianOwnerTooltipTextLeft2
-	local subtitle = text and text:GetText() or ''
-	return strfind(subtitle, "'s Companion")
+function BuloLayer:IsLayerIdValid(layerId)
+	--Will turn this back on if needed
+	--if self.minLayerId >= 0 and self.maxLayerId >= 0 and self.maxLayerId - self.minLayerId > 100 and ((layerId >= 0 and layerId < self.minLayerId and self.minLayerId - layerId > 200) or (layerId >= 0 and layerId > self.maxLayerId and layerId - self.maxLayerId > 200)) then
+	--	return false
+	--end
+	return layerId >= 0
 end
 
 function GetLayerGuess(layerId, minLayerId, maxLayerId)
@@ -347,14 +397,6 @@ end
 
 function CanInvite()
 	return not IsInGroup() or (IsInGroup() and (UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")))
-end
-
-function GetVersionString(ver)
-	if ver >= 10 then
-		return GetVersionString(floor(ver/10)) .. "." .. tostring(ver % 10)
-	else
-		return "v" .. tostring(ver)
-	end
 end
 
 BuloLayer:RegisterEvent("PLAYER_TARGET_CHANGED")
