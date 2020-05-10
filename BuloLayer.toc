@@ -1,7 +1,7 @@
-﻿## Interface: 11304
+## Interface: 11304
 ## Title: |cffff306fBuloLayer|r
-## Author: Bulo+DungFu
-## Version: 1.4.1
+## Author: Bulo/DungFU
+## Version: 1.5.1
 ## Notes: Allows easy and automatic layer hopping within guild
 ## SavedVariablesPerCharacter: BuloLayerOptions
 
